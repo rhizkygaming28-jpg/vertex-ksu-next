@@ -1,0 +1,73 @@
+name: Build Vertex Kernel KSU Next Poco X5 5G
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Menginstal Dependensi Sistem
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses5-dev libsdl1.1-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev libtinfo5
+
+    - name: Mengunduh Toolchain Clang (AOSP Clang)
+      run: |
+        mkdir -p $GITHUB_WORKSPACE/toolchain
+        cd $GITHUB_WORKSPACE/toolchain
+        curl -LO https://googlesource.com
+        tar -xzf clang-r522817.tar.gz -C .
+        rm clang-r522817.tar.gz
+
+    - name: Mengkloning Source Code Kernel Vertex (Poco X5 5G)
+      run: |
+        # Mengkloning source code basis xiaomi SM6375 / stone
+        git clone --depth=1 https://github.com -b 14 $GITHUB_WORKSPACE/kernel
+
+    - name: Membersihkan KSU Standar & Menyuntikkan KSU Next
+      run: |
+        cd $GITHUB_WORKSPACE/kernel
+        # Menghapus folder KernelSU bawaan lama agar tidak bentrok
+        rm -rf drivers/kernelsu
+        # Mengintegrasikan skrip otomatis KernelSU Next
+        curl -LSs "https://githubusercontent.com" | bash -
+
+    - name: Mengatur Konfigurasi Kprobes di Defconfig
+      run: |
+        cd $GITHUB_WORKSPACE/kernel
+        # Memastikan parameter kprobes aktif untuk KSU Next
+        echo "CONFIG_MODULES=y" >> arch/arm64/configs/stone_defconfig
+        echo "CONFIG_KPROBES=y" >> arch/arm64/configs/stone_defconfig
+        echo "CONFIG_HAVE_KPROBES=y" >> arch/arm64/configs/stone_defconfig
+        echo "CONFIG_KPROBE_EVENTS=y" >> arch/arm64/configs/stone_defconfig
+
+    - name: Proses Kompilasi Kernel
+      run: |
+        cd $GITHUB_WORKSPACE/kernel
+        export PATH=$GITHUB_WORKSPACE/toolchain/bin:$PATH
+        export ARCH=arm64
+        export SUBARCH=arm64
+        make O=out stone_defconfig
+        make -j$(nproc) O=out \
+          CC=clang \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-android- \
+          CROSS_COMPILE_ARM32=arm-linux-androideabi-
+
+    - name: Membungkus Kernel ke AnyKernel3 (Zip Flashable)
+      run: |
+        cd $GITHUB_WORKSPACE
+        git clone --depth=1 https://github.com
+        cp kernel/out/arch/arm64/boot/Image AnyKernel3/
+        cd AnyKernel3
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+        sed -i 's/block=\/dev\/block\/platform\/omap\/omap_hsmmc.0\/by-name\/boot;/block=auto;/g' anykernel.sh
+        zip -r ../Vertex_KSU_Next_PocoX5.zip *
+
+    - name: Mengunggah File Jadi
+      uses: actions/upload-artifact@v4
+      with:
+        name: Vertex-KSU-Next-PocoX5
+        path: Vertex_KSU_Next_PocoX5.zip
+        
